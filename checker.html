@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>詐欺ガード｜怪しい文面チェッカー</title>
+<meta name="description" content="怪しいSMS・メール・DMの文面を貼るだけで、詐欺・悪質勧誘に共通する操作パターンを検出します。文面は送信されません。">
+<meta property="og:title" content="詐欺ガード｜怪しい文面チェッカー">
+<meta property="og:description" content="怪しい文面を貼るだけで、詐欺の操作パターンを検出。文面は送信されません。困ったら #9110／188。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 5 L90 20 V50 C90 75 72 90 50 95 C28 90 10 75 10 50 V20 Z' fill='%230b3d66'/%3E%3Cpath d='M32 52 L45 65 L70 38' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; margin: 0; background: #f6f7f9; color: #222; font-size: 16px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 56px; }
+  h1 { font-size: 26px; margin: 8px 0 6px; line-height: 1.4; }
+  .sub { color: #444; font-size: 16px; margin-bottom: 16px; line-height: 1.8; }
+  .safe { display: inline-block; background: #e6f4ea; color: #137333; border-radius: 999px; padding: 4px 12px; font-size: 14px; font-weight: bold; margin-bottom: 12px; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 160px; padding: 16px; font-size: 16px; line-height: 1.7; border: 1.5px solid #bbb; border-radius: 12px; background: #fff; }
+  textarea:focus { outline: 3px solid #a8c7fa; border-color: #1a73e8; }
+  button.main { margin-top: 16px; width: 100%; min-height: 56px; padding: 16px; font-size: 18px; font-weight: bold; background: #0b3d66; color: #fff; border: none; border-radius: 12px; cursor: pointer; }
+  button.main:active { background: #082c4a; }
+  .samples { margin-top: 16px; font-size: 16px; color: #444; }
+  .samples button { margin: 4px 2px; min-height: 44px; padding: 8px 16px; border: 1px solid #bbb; background: #fff; border-radius: 999px; cursor: pointer; font-size: 16px; }
+  #result { margin-top: 24px; display: none; border-radius: 12px; padding: 24px; }
+  .high { background: #fdecea; border: 2.5px solid #d93025; }
+  .mid { background: #fef7e0; border: 2.5px solid #f9ab00; }
+  .low { background: #fef7e0; border: 1.5px solid #f9ab00; }
+  .none { background: #e6f4ea; border: 1.5px solid #34a853; }
+  .level { font-size: 24px; font-weight: bold; margin-bottom: 8px; line-height: 1.4; }
+  h3 { font-size: 16px; margin: 16px 0 8px; }
+  ul { margin: 4px 0; padding-left: 22px; font-size: 16px; line-height: 1.8; }
+  .note { margin-top: 32px; font-size: 14px; color: #555; line-height: 1.8; background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; }
+  .note .tel { font-size: 17px; color: #0b3d66; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>詐欺ガード｜怪しい文面チェッカー</h1>
+  <div class="sub">怪しい文面（SMS・メール・LINE・SNSのDMなど）を貼り付けると、詐欺・悪質勧誘に共通する「あやしい言い回しのパターン」を検出して、危険度と理由をお知らせします。</div>
+  <span class="safe">✓ 入力した文面は、このページの外に送信されません</span>
+  <textarea id="input" placeholder="ここに怪しい文面を貼り付けてください" aria-label="判定したい文面"></textarea>
+  <button class="main" onclick="run()">この文面を判定する</button>
+  <div class="samples">まずはサンプルで試せます：
+    <button onclick="loadSample(0)">還付金詐欺</button>
+    <button onclick="loadSample(1)">ニセ警察</button>
+    <button onclick="loadSample(2)">投資詐欺</button>
+    <button onclick="loadSample(3)">架空請求SMS</button>
+    <button onclick="loadSample(4)">正常な案内</button>
+  </div>
+  <div id="result"></div>
+  <div class="note">
+    ※ これは試作版です。判定は「詐欺である」と断定するものではなく、リスクの高いパターンの検出結果です。<br>
+    ※ 実際にお困りのとき：<span class="tel">警察相談専用電話 <b>#9110</b>／消費者ホットライン <b>188</b></span>（いやや）。すでにお金を渡してしまった場合は、すぐに警察と金融機関へ連絡してください。
+  </div>
+</div>
+<script>
+/* 詐欺ガード ルール層エンジン v0.3（engine.js と同一スプライス）
+ * 入力テキストを操作パターン9軸で判定する。patterns/pattern-library.md v0.3 が正本。
+ * 方針: 見逃し >> 誤報。PAY(支払い手段の指定)は最強シグナル。複合で加点。
+ */
+"use strict";
+
+// 軸ごとに [フレーズ, 重み] 。重み: 3=その軸の中で決定的に近い / 2=強い / 1=補助
+const AXES = {
+  URG: { name: "焦らせる（緊急性）", phrases: [
+    ["今日中", 3], ["今すぐ", 3], ["至急", 2], ["直ちに", 2], ["期限が過ぎ", 3],
+    ["本日中", 2], ["24時間以内", 2], ["すぐに手続き", 2], ["今からすぐ", 2], ["時間がない", 1],
+  ]},
+  AUTH: { name: "権威をかたる", phrases: [
+    ["警察", 2], ["検察", 3], ["裁判所", 2], ["税務署", 3], ["市役所", 2], ["区役所", 2],
+    ["年金事務所", 3], ["銀行協会", 3], ["総務省", 2], ["消費者センター", 1],
+    ["息子", 1], ["孫", 1], ["弁護士", 1],
+    ["Canada Revenue Agency", 2], ["Social Security Administration", 2],
+    ["Hello Mum", 1], ["Hallo Mama", 1],
+  ]},
+  SEC: { name: "秘密の強要・孤立化", phrases: [
+    ["誰にも言わないで", 3], ["誰にも言わず", 3], ["内緒", 2], ["極秘", 3], ["口外", 2],
+    ["相談しないで", 3], ["番号が変わった", 3], ["新しい番号", 2], ["この番号に", 1],
+    ["LINEで連絡", 2], ["LINEに移", 2], ["電話を切らないで", 3], ["家族には言うな", 3],
+    ["秘密", 1],
+    ["gag order", 3], ["my new number", 2], ["nuevo número", 2], ["uusi numeroni", 2],
+    ["meine neue Handynummer", 2],
+  ]},
+  PAY: { name: "支払い手段・情報の指定", phrases: [
+    ["ATM", 3], ["ギフトカード", 3], ["電子マネー", 3], ["プリペイドカード", 3],
+    ["暗号資産", 3], ["ビットコイン", 3], ["振り込", 2], ["振込", 2], ["送金して", 2],
+    ["送金し", 2], ["暗証番号を教え", 3], ["暗証番号を聞", 2], ["キャッシュカードを預か", 3],
+    ["キャッシュカードを渡", 3], ["現金を持って", 2], ["手渡し", 1], ["コンビニで買", 2],
+    ["コードを教え", 3], ["個人口座", 2], ["暗証番号", 1], ["カード番号を入力", 2], ["代引", 2],
+    ["safe account", 3], ["Zelle", 2], ["Cash App", 2], ["Venmo", 2], ["Interac", 2],
+    ["e-Transfer", 2], ["PayID", 2], ["PayNow", 2], ["DuitNow", 2], ["Bizum", 2], ["TWINT", 2],
+    ["gift cards", 3], ["crypto ATM", 3], ["Bitcoin ATM", 3], ["wire transfer", 2],
+    ["安全な口座", 2], ["資金の検査", 2],
+  ]},
+  FEAR: { name: "不安・恐怖の喚起", phrases: [
+    ["逮捕", 3], ["凍結", 3], ["訴え", 2], ["法的措置", 3], ["未払い", 2],
+    ["ウイルスに感染", 3], ["感染しました", 2], ["不正利用", 2], ["悪用され", 2],
+    ["差し押さえ", 3], ["利用停止", 2], ["アカウントが停止", 2], ["訴える", 2], ["通報", 1], ["損害賠償を請求", 2], ["最終確認通知書", 2],
+    ["キャッシュカードが見つかった", 2], ["キャッシュカードが入っていた", 2],
+    ["you will be arrested", 3], ["warrant for your arrest", 3], ["digital arrest", 3],
+    ["帳戶將被凍結", 3], ["SUSPENSION OF SOCIAL SECURITY NUMBER", 3],
+  ]},
+  TRUST: { name: "信頼構築の演出", phrases: [
+    ["元本保証", 3], ["必ず儲かる", 3], ["必ず稼げる", 3], ["実績", 1],
+    ["利益が出", 1], ["月利", 2], ["配当", 1], ["皆さん稼い", 2], ["限定募集", 1],
+    ["Rate mal, wer hier spricht", 1],
+  ]},
+  ESC: { name: "段階的な追加要求", phrases: [
+    ["出金するには", 2], ["手数料を払えば", 3], ["追加で", 1], ["保証金", 3],
+    ["税金を払えば", 3], ["あと少しで", 1], ["もう一度送金", 3], ["追加送金", 3], ["2回分の契約", 2],
+    ["無実を証明するための調査費用", 2],
+    ["processing fee", 2], ["activation fee", 2],
+  ]},
+  BLAME: { name: "責任転嫁", phrases: [
+    ["あなたのミス", 3], ["操作ミス", 3], ["あなたの責任", 2], ["連帯責任", 3],
+    ["あなたが間違", 2],
+  ]},
+  BAIT: { name: "餌（得する話）", phrases: [
+    ["還付金", 3], ["払い戻し", 2], ["簡単に稼げる", 3], ["副業", 1], ["権利収入", 3],
+    ["紹介料", 2], ["儲かる", 2], ["当選", 2], ["プレゼント", 1], ["お金が戻", 2],
+    ["稼げる", 2], ["年末セール", 1],
+  ]},
+};
+
+// 公式ルール由来の即・高リスク判定（決定的パターンのハードルール）
+const HARD_RULES = [
+  { test: (t) => /暗証番号/.test(t) && /(教え|聞かせ|入力)/.test(t),
+    reason: "暗証番号を聞き出す（銀行・警察・役所が電話や文面で暗証番号を聞くことはありません＝公式ルール）" },
+  { test: (t) => /キャッシュカードを(預か|渡し|取りに)/.test(t),
+    reason: "キャッシュカードを預かる・取りに来る（公式に『全て詐欺』と明言されている手口）" },
+  { test: (t) => /(還付金|払い戻し)/.test(t) && /ATM/.test(t),
+    reason: "還付金×ATM操作（ATMで還付金は受け取れません。操作は実質送金です）" },
+  { test: (t) => /(逮捕|凍結|極秘)/.test(t) && /(振り込|送金|現金|引き出)/.test(t),
+    reason: "逮捕・口座凍結・極秘捜査を理由にした金銭移動の要求（ニセ警察詐欺の典型構成）" },
+  { test: (t) => /safe account/i.test(t) && /(transfer|move|send|protect)/i.test(t),
+    reason: "「安全な口座へ移せば守れる」という文句（米SSA・英金融界が『公的機関は絶対に言わない』と明言する詐欺の決め手）" },
+];
+
+function analyze(text) {
+  const t = String(text || "");
+  const tl = t.toLowerCase(); // 英字フレーズの大文字小文字を吸収する（日本語には影響しない）
+  const hits = {}; // axis -> {score, phrases:[...]}
+  let total = 0;
+  for (const [code, axis] of Object.entries(AXES)) {
+    let score = 0; const found = [];
+    for (const [phrase, w] of axis.phrases) {
+      if (tl.includes(phrase.toLowerCase())) { score += w; found.push(phrase); }
+    }
+    if (score > 0) { hits[code] = { name: axis.name, score: Math.min(score, 6), phrases: found }; total += Math.min(score, 6); }
+  }
+  // 複合ボーナス（ライブラリ§3：PAY単独でも中以上、圧力系との複合で高）
+  let bonus = 0; const combos = [];
+  const has = (c) => !!hits[c];
+  if (has("PAY") && (has("URG") || has("FEAR") || has("SEC"))) {
+    bonus += 6; combos.push("支払い指定 × 圧力（焦らせ／恐怖／秘密）の複合");
+  }
+  if (has("PAY") && has("AUTH")) { bonus += 4; combos.push("権威の名乗り × 支払い指定の複合"); }
+  if (has("SEC") && has("PAY")) { bonus += 3; combos.push("孤立化 × 支払い指定の複合"); }
+  if ((has("TRUST") || has("BAIT")) && has("ESC")) { bonus += 4; combos.push("信頼・餌 × 段階的追加要求の複合"); }
+  total += bonus;
+
+  const hard = HARD_RULES.filter((r) => r.test(t)).map((r) => r.reason);
+
+  let level, levelLabel;
+  if (hard.length > 0 || total >= 16) { level = "high"; levelLabel = "危険度：高"; }
+  else if (total >= 7 || (has("PAY") && total >= 4)) { level = "mid"; levelLabel = "危険度：中"; }
+  else if (total >= 2) { level = "low"; levelLabel = "危険度：低（注意）"; }
+  else { level = "none"; levelLabel = "危険なパターンは検出されませんでした"; }
+
+  const actions = [];
+  if (level === "high" || level === "mid") {
+    actions.push("この文面の指示には従わず、送金・支払い・情報入力をしないでください");
+    actions.push("相手の連絡先ではなく、自分で調べた公式の電話番号（カード裏面・公式サイト）にかけ直してください");
+    actions.push("家族など身近な人に、文面をそのまま見せて相談してください");
+    actions.push("急かされている場合は警察相談専用電話 #9110、消費者トラブルは消費者ホットライン 188（いやや）へ");
+  } else if (level === "low") {
+    actions.push("断定はできません。支払いや個人情報の入力を求められたら、その前に公式窓口で確認してください");
+  }
+  return { level, levelLabel, score: total, hits, combos, hardRules: hard, actions };
+}
+
+
+
+const SAMPLES = [
+  "市役所からお知らせです。医療費の還付金があります。期限が過ぎていますが、今日中に手続きすれば間に合いますので、近くのATMに行ってください。暗証番号を教えていただく場合があります。",
+  "極秘で事件の捜査をしています。あなたの銀行口座が悪用されており、凍結されるので至急現金を引き出してください。誰にも言わないでください。あなたは逮捕される可能性があります。",
+  "元本保証で必ず儲かる投資です。月利10%の実績があります。詳しくはLINEで連絡してください。出金するには手数料を払えば大丈夫です。",
+  "【重要】利用料金の未払いがあります。本日中にご連絡がない場合、法的措置を取ります。電子マネーでお支払いください。",
+  "いつもご利用ありがとうございます。新しいアプリのご案内です。詳細は公式サイトをご確認ください。窓口は平日9時から15時まで営業しております。"
+];
+function loadSample(i) { document.getElementById("input").value = SAMPLES[i]; }
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+function run() {
+  const text = document.getElementById("input").value;
+  const r = analyze(text);
+  const box = document.getElementById("result");
+  box.className = r.level; box.style.display = "block";
+  let html = "<div class=\"level\">" + esc(r.levelLabel) + "</div>";
+  if (r.hardRules.length) {
+    html += "<h3>決定的な警告</h3><ul>" + r.hardRules.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>";
+  }
+  if (r.actions.length) {
+    html += "<h3>今すぐやること</h3><ul>" + r.actions.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>";
+  }
+  const keys = Object.keys(r.hits);
+  if (keys.length) {
+    // 悪用防止（2026-11-05 悪用レビュー）：無料チェッカーでは一致したフレーズとスコアを表示しない。
+    // 詐欺側が「検知される言い回し」を特定して回避文面を調整するテスト台になるのを防ぐため、
+    // 表示はパターンの種類と一般的な説明までに留める。
+    const AXIS_DESC = {
+      URG: "期限や緊急性を強調して、考える時間を奪おうとする言い回し",
+      AUTH: "公的機関や有名企業などを名乗り、信用させようとする言い回し",
+      SEC: "他人に相談させない、別の連絡手段へ移そうとする言い回し",
+      PAY: "特定の支払い手段（電子マネー・振込・代引など）へ誘導する言い回し",
+      FEAR: "逮捕・差し押さえ・損害賠償など、恐怖で動かそうとする言い回し",
+      TRUST: "実績や少額の成功体験を見せて信用させようとする言い回し",
+      ESC: "少額から高額へ、段階的に要求を大きくしていく構成",
+      BLAME: "あなたのミスだと責任を負わせようとする言い回し",
+      BAIT: "還付金・セール・高収入など、得に見せかける餌"
+    };
+    html += "<h3>検出された操作パターン</h3><ul>" + keys.map(k => {
+      const h = r.hits[k];
+      return "<li><b>" + esc(h.name) + "</b> <span class=\"phr\">" + esc(AXIS_DESC[k] || "") + "</span></li>";
+    }).join("") + "</ul>";
+  }
+  if (r.combos.length) {
+    html += "<h3>危険な組み合わせ</h3><ul>" + r.combos.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>";
+  }
+  box.innerHTML = html;
+}
+</script>
+</body>
+</html>
